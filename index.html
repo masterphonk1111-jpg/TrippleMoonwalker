@@ -356,15 +356,14 @@ async function startCamera() {
   if (!video.videoWidth) await new Promise((r) => { video.onloadedmetadata = () => r(); });
   maskReady = false; faceT = 0;
 }
-async function initModels() {
+async function initModels(forceCpu) {
   fileset = await FilesetResolver.forVisionTasks(WASM);
   const opts = (delegate) => ({
     baseOptions: { modelAssetPath: FACE_MODEL, delegate }, runningMode: "VIDEO", numFaces: 1,
     outputFaceBlendshapes: false, outputFacialTransformationMatrixes: true
   });
-  const first = location.search.indexOf("cpu") >= 0 ? "CPU" : "GPU";
-  try { landmarker = await FaceLandmarker.createFromOptions(fileset, opts(first)); }
-  catch (e) { landmarker = await FaceLandmarker.createFromOptions(fileset, opts("CPU")); }
+  const cpu = forceCpu || location.search.indexOf("cpu") >= 0;
+  landmarker = await FaceLandmarker.createFromOptions(fileset, opts(cpu ? "CPU" : "GPU"));
 }
 async function ensureSegmenter() {
   if (segmenter) return;
@@ -2438,14 +2437,16 @@ $("go").addEventListener("click", async () => {
       if (!window.isSecureContext) throw new Error("insecure");
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("nocam");
       msg.textContent = "Starting camera..."; await startCamera();
-      msg.textContent = "Loading face tracking (first time takes a moment)..."; await initModels();
+      msg.textContent = "Loading face tracking (first time takes a moment)...";
+      try { await initModels(false); }
+      catch (e1) { msg.textContent = "Switching to safe mode..."; landmarker = null; await initModels(true); }
     }
   } catch (e) {
     go.disabled = false; const n = e && e.name, m = e && e.message;
     if (m === "insecure") msg.textContent = "The camera needs a secure page (https).";
     else if (n === "NotAllowedError") msg.textContent = "Camera access was blocked. Allow the camera for this page and try again.";
     else if (n === "NotFoundError") msg.textContent = "No camera was found on this device.";
-    else msg.textContent = "Could not start: " + (m || n || "unknown error");
+    else msg.textContent = "Could not start: " + (m || n || "unknown error") + ". Close other tabs and apps, then reload. You can also add ?cpu to the end of the link.";
     return;
   }
   $("start").hidden = true;
